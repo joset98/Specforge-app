@@ -24,7 +24,8 @@ def ok_handler(seen):
 
 async def test_creates_one_issue_per_story(sample_result):
     seen: list[httpx.Request] = []
-    created, error = await create_issues(sample_result, "o/r", TOKEN, gh_client(ok_handler(seen)))
+    created, error, _ = await create_issues(sample_result, "o/r", TOKEN,
+                                            gh_client(ok_handler(seen)))
     assert error is None
     assert created == [{"story_id": "US-1", "url": "https://github.com/o/r/issues/1"},
                        {"story_id": "US-2", "url": "https://github.com/o/r/issues/2"}]
@@ -44,8 +45,8 @@ async def test_stops_on_error_and_reports_created(sample_result):
             return httpx.Response(201, json={"html_url": "https://github.com/o/r/issues/1"})
         return httpx.Response(404, json={"message": "Not Found"})
 
-    created, error = await create_issues(sample_result, "o/r", TOKEN, gh_client(handler))
-    assert len(created) == 1 and error == "Not Found"
+    created, error, status = await create_issues(sample_result, "o/r", TOKEN, gh_client(handler))
+    assert len(created) == 1 and error == "Not Found" and status == 404
 
 
 def _client(handler):
@@ -77,8 +78,19 @@ def test_route_success_and_partial_failure(sample_result):
     client = _client(lambda r: httpx.Response(401, json={"message": "Bad credentials"}))
     res = client.post("/api/export/github", headers={"X-GitHub-Token": TOKEN}, json=body)
     app.dependency_overrides.clear()
-    assert res.status_code == 502
+    assert res.status_code == 401
     assert res.json() == {"issues": [], "error": "Bad credentials"}
+
+
+def test_route_network_failure_502(sample_result):
+    def boom(req):
+        raise httpx.ConnectError("down")
+
+    client = _client(boom)
+    res = client.post("/api/export/github", headers={"X-GitHub-Token": TOKEN},
+                      json={"result": sample_result.model_dump(), "repo": "o/r"})
+    app.dependency_overrides.clear()
+    assert res.status_code == 502 and res.json()["error"] == "Could not reach GitHub."
 
 
 def test_token_not_in_logs(sample_result, caplog):

@@ -1,6 +1,7 @@
 """Hand-written pipeline: PO → Architect → QA, then a deterministic validator that sends
 targeted corrections back to the responsible agent (and everything downstream of it)."""
 
+import logging
 from collections.abc import AsyncIterator
 from typing import Any, Literal
 
@@ -25,6 +26,7 @@ from app.validator import validate
 
 Event = tuple[Literal["stage", "validation", "result", "error"], dict[str, Any]]
 ORDER: list[Section] = ["product_owner", "architect", "qa"]
+log = logging.getLogger("app.orchestrator")
 
 
 class _State:
@@ -100,6 +102,10 @@ class Orchestrator:
         except ValidationError:
             yield ("error", {"code": "llm_output_invalid",
                              "message": "The model returned invalid output twice. Try again."})
+        except Exception:
+            log.exception("pipeline crashed")
+            yield ("error", {"code": "internal",
+                             "message": "Something went wrong on our side. Try again."})
 
     async def _step(self, state: _State, section: Section, *, issues: list[Issue] | None = None,
                     feedback: str | None = None, previous: BaseModel | None = None,

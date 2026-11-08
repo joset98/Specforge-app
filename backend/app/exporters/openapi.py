@@ -27,10 +27,17 @@ def _component(t: Table) -> dict:
     return schema
 
 
-def _operation(e: Endpoint, tables: set[str]) -> dict:
+def normalize_path(path: str) -> str:
+    """'/a/:id?x=1' -> '/a/{id}': OpenAPI needs a leading slash, {param} syntax and no query."""
+    path = path.split("?", 1)[0].strip() or "/"
+    path = re.sub(r":([A-Za-z_]\w*)", r"{\1}", path)
+    return path if path.startswith("/") else "/" + path
+
+
+def _operation(e: Endpoint, path: str, tables: set[str]) -> dict:
     ref = lambda name: {"$ref": f"#/components/schemas/{name}"}  # noqa: E731
     op: dict = {"operationId": e.id, "summary": e.description, "tags": e.story_ids}
-    params = re.findall(r"{([^}/]+)}", e.path)
+    params = re.findall(r"{([^}/]+)}", path)
     if params:
         op["parameters"] = [{"name": p, "in": "path", "required": True,
                              "schema": {"type": "string"}} for p in params]
@@ -52,8 +59,8 @@ def to_openapi(r: PipelineResult, title: str = "Generated API") -> str:
     tables = {t.name for t in r.architecture.tables}
     paths: dict[str, dict] = {}
     for e in r.architecture.endpoints:
-        path = e.path if e.path.startswith("/") else "/" + e.path
-        paths.setdefault(path, {})[e.method.lower()] = _operation(e, tables)
+        path = normalize_path(e.path)
+        paths.setdefault(path, {})[e.method.lower()] = _operation(e, path, tables)
     doc = {
         "openapi": "3.1.0",
         "info": {"title": title, "version": "0.1.0",

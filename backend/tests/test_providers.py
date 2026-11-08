@@ -118,3 +118,12 @@ def test_factory_without_any_key_raises_auth():
     with pytest.raises(ProviderError) as e:
         make_provider(None, None, Settings(_env_file=None))
     assert e.value.code == "auth"
+
+
+async def test_claude_truncated_output_raises_clear_error():
+    msg = claude_message({"stories": []})
+    msg["stop_reason"] = "max_tokens"
+    p = ClaudeProvider("k", "m", http_client=claude_client(lambda r: httpx.Response(200, json=msg)))
+    with pytest.raises(ProviderError) as e:
+        await p.generate_structured("s", "u", ProductOwnerOutput)
+    assert e.value.code == "upstream" and "too long" in e.value.message

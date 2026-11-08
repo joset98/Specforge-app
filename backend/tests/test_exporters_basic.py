@@ -35,3 +35,14 @@ def test_jira_csv_roundtrips_commas_and_newlines(sample_result):
     assert "reservar una cita, con mascota registrada\n" in rows[0]["Description"]
     assert (rows[0]["Priority"], rows[1]["Priority"]) == ("High", "Medium")
     assert rows[0]["Issue Type"] == "Story" and rows[0]["Labels"] == "ai-generated"
+
+
+def test_jira_csv_cells_never_start_a_formula(sample_result):
+    from app.exporters.jira_csv import _safe
+
+    assert _safe("=1+1") == "'=1+1" and _safe("@x") == "'@x" and _safe("-2") == "'-2"
+    assert _safe("[US-1] ok") == "[US-1] ok"
+    r = sample_result.model_copy(deep=True)
+    r.stories[0].title = '=HYPERLINK("http://evil")'
+    for row in csv.DictReader(io.StringIO(to_jira_csv(r))):
+        assert all(v[:1] not in ("=", "+", "-", "@") for v in row.values())

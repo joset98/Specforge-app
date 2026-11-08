@@ -7,7 +7,7 @@ export async function* parseSSE(body: ReadableStream<Uint8Array>): AsyncGenerato
   let buffer = ''
   for (;;) {
     const { value, done } = await reader.read()
-    if (value) buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n')
+    buffer += (value ? decoder.decode(value, { stream: true }) : decoder.decode()).replace(/\r\n/g, '\n')
     let sep: number
     while ((sep = buffer.indexOf('\n\n')) !== -1) {
       const block = buffer.slice(0, sep)

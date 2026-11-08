@@ -46,3 +46,24 @@ def test_corrupt_docx_rejected():
 def test_requires_exactly_one_source():
     with pytest.raises(ExtractionError):
         extract_text(None, None, None, 100)
+
+
+def test_docx_keeps_order_dedupes_merged_and_reads_nested():
+    import io
+
+    from docx import Document
+
+    doc = Document()
+    doc.add_paragraph("Antes")
+    t = doc.add_table(rows=1, cols=2)
+    merged = t.cell(0, 0).merge(t.cell(0, 1))
+    merged.text = "Celda combinada"
+    nested = t.cell(0, 0).add_table(rows=1, cols=1)
+    nested.cell(0, 0).text = "Tabla anidada"
+    doc.add_paragraph("Después")
+    buf = io.BytesIO()
+    doc.save(buf)
+    out = extract_text("r.docx", buf.getvalue(), None, 30000)
+    assert out.count("Celda combinada") == 1
+    assert "Tabla anidada" in out
+    assert out.index("Antes") < out.index("Celda combinada") < out.index("Después")

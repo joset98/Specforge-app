@@ -67,24 +67,35 @@ def quota(request: Request, q: QuotaTracker = Depends(get_quota)) -> dict:
 
 
 def _start(request: Request, provider: str | None, key: str | None, q: QuotaTracker,
-           factory: ProviderFactory) -> Orchestrator:
-    """Build the provider first (no network), then charge the free quota only if it worked."""
+           factory: ProviderFactory) -> tuple[Orchestrator, Callable[[], None] | None]:
+    """Build the provider first (no network), then charge the free quota only if it worked.
+    Returns the orchestrator and, for free runs, a callback that gives the run back."""
     try:
         llm = factory(provider, key, settings)
     except ProviderError as e:
         raise HTTPException(PROVIDER_STATUS[e.code], e.message) from e
-    if not key and not q.try_consume(client_ip(request, settings.trust_proxy)):
-        raise HTTPException(429, "free_quota_exhausted")
+    refund = None
+    if not key:
+        ip = client_ip(request, settings.trust_proxy)
+        if not q.try_consume(ip):
+            raise HTTPException(429, "free_quota_exhausted")
+        refund = lambda: q.refund(ip)  # noqa: E731
     log.info("pipeline start provider=%s byok=%s", provider or settings.default_provider,
              bool(key))
-    return Orchestrator(llm)
+    return Orchestrator(llm), refund
 
 
-def _stream(events: AsyncIterator[Event]) -> StreamingResponse:
+def _stream(events: AsyncIterator[Event], refund: Callable[[], None] | None) -> StreamingResponse:
     async def body():
+        progressed = False
         async for event, data in events:
+            if event == "stage" and data["status"] == "done":
+                progressed = True
             if event == "error":
                 log.warning("pipeline error code=%s", data["code"])
+                # The visitor got nothing for this run (e.g. the owner's key is out of credit).
+                if refund and not progressed:
+                    refund()
             yield format_sse(event, data)
 
     return StreamingResponse(body(), media_type="text/event-stream",
@@ -115,8 +126,8 @@ async def create_run(
         raise HTTPException(400, str(e)) from e
     run_input = RunInput(text=requirement,
                          team_context=team_context.strip()[: settings.max_context_chars])
-    orch = _start(request, x_llm_provider, x_llm_key, q, factory)
-    return _stream(orch.run(run_input))
+    orch, refund = _start(request, x_llm_provider, x_llm_key, q, factory)
+    return _stream(orch.run(run_input), refund)
 
 
 @app.post("/api/refine")
@@ -128,8 +139,8 @@ async def refine(
     q: QuotaTracker = Depends(get_quota),
     factory: ProviderFactory = Depends(get_provider_factory),
 ):
-    orch = _start(request, x_llm_provider, x_llm_key, q, factory)
-    return _stream(orch.refine(body.result, body.section, body.feedback))
+    orch, refund = _start(request, x_llm_provider, x_llm_key, q, factory)
+    return _stream(orch.refine(body.result, body.section, body.feedback), refund)
 
 
 async def get_http_client() -> AsyncIterator[httpx.AsyncClient]:
@@ -146,10 +157,10 @@ async def export_github(
 ):
     if not x_github_token:
         raise HTTPException(400, "Missing X-GitHub-Token header.")
-    created, error = await create_issues(body.result, body.repo, x_github_token, client)
+    created, error, status = await create_issues(body.result, body.repo, x_github_token, client)
     if error:
         log.warning("github export failed after %d issues", len(created))
-        return JSONResponse({"issues": created, "error": error}, status_code=502)
+        return JSONResponse({"issues": created, "error": error}, status_code=status)
     return {"issues": created}
 
 

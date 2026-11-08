@@ -16,7 +16,7 @@ class ClaudeProvider:
         try:
             msg = await self.client.messages.create(
                 model=self.model,
-                max_tokens=8000,
+                max_tokens=16000,
                 system=system,
                 messages=[{"role": "user", "content": user}],
                 tools=[{"name": "submit", "description": "Submit the result.",
@@ -29,5 +29,8 @@ class ClaudeProvider:
             raise ProviderError("rate_limited") from e
         except anthropic.APIError as e:
             raise ProviderError("upstream") from e
+        if msg.stop_reason == "max_tokens":
+            raise ProviderError("upstream", "The answer was too long for the model's output "
+                                "limit. Try a shorter or more focused requirement.")
         block = next((b for b in msg.content if b.type == "tool_use"), None)
         return schema.model_validate(block.input if block else {})

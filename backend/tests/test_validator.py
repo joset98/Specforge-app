@@ -85,3 +85,9 @@ def test_gherkin_invalid(sample_result, keyword):
     r = sample_result.model_copy(deep=True)
     r.stories[0].gherkin = r.stories[0].gherkin.replace(keyword, "X")
     assert codes(run(r)) == [("GHERKIN_INVALID", "product_owner")]
+
+
+def test_duplicate_route(sample_result):
+    r = sample_result.model_copy(deep=True)
+    r.architecture.endpoints[2].path = "/owners/{ownerId}/pets"
+    assert codes(run(r)) == [("DUPLICATE_ROUTE", "architect")]

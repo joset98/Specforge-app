@@ -27,6 +27,10 @@ class QuotaTracker:
         global_left = self.global_cap - self.used.total()
         return max(0, min(self.per_ip - self.used[ip], global_left))
 
+    def refund(self, ip: str) -> None:
+        if self.used[ip] > 0:
+            self.used[ip] -= 1
+
     def try_consume(self, ip: str) -> bool:
         if self.remaining(ip) <= 0:
             return False

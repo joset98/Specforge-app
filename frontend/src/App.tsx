@@ -19,11 +19,13 @@ export default function App() {
   const [quota, setQuota] = useState<{ remaining: number; limit: number } | null>(null)
   const lastAction = useRef<Action | null>(null)
   const abort = useRef<AbortController | null>(null)
+  const runId = useRef(0)
 
   const refreshQuota = useCallback(() => { getQuota().then(setQuota).catch(() => setQuota(null)) }, [])
   useEffect(refreshQuota, [refreshQuota])
 
   async function execute(action: Action) {
+    const id = ++runId.current
     lastAction.current = action
     abort.current?.abort()
     setRunning(true); setError(null); setStages({}); setLog([])
@@ -58,8 +60,11 @@ export default function App() {
         setError(e instanceof ApiError ? e.message : 'Could not reach the server. Check your connection.')
       }
     } finally {
-      setRunning(false)
-      refreshQuota()
+      // A stopped run settles after a newer one may have started; only the newest owns `running`.
+      if (id === runId.current) {
+        setRunning(false)
+        refreshQuota()
+      }
     }
   }
 
@@ -85,7 +90,7 @@ export default function App() {
           running={running} quota={quota} auth={auth} onAuthChange={setAuth}
           showKey={showKey} onToggleKey={() => setShowKey((v) => !v)}
           onRun={onRun} onCancel={() => { abort.current?.abort(); setRunning(false) }}
-          onImport={(r) => { setResult(r); setStages({}); setLog([]); setError(null) }}
+          onImport={(r) => { lastAction.current = null; setResult(r); setStages({}); setLog([]); setError(null) }}
           onError={setError}
         />
         <div className="workspace">

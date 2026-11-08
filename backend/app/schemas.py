@@ -1,6 +1,6 @@
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, BeforeValidator, Field
+from pydantic import AfterValidator, BaseModel, BeforeValidator, Field
 
 
 def normalize_id(v: object) -> object:
@@ -110,6 +110,13 @@ class RefineRequest(BaseModel):
     feedback: str = Field(min_length=1, max_length=2000)
 
 
+def _no_dot_segments(repo: str) -> str:
+    # A segment made only of dots would make httpx resolve another GitHub API path.
+    if any(set(part) == {"."} for part in repo.split("/")):
+        raise ValueError("repo must be owner/name")
+    return repo
+
+
 class GithubExportRequest(BaseModel):
     result: PipelineResult
-    repo: str = Field(pattern=r"^[\w.-]+/[\w.-]+$")
+    repo: Annotated[str, Field(pattern=r"^[\w.-]+/[\w.-]+$"), AfterValidator(_no_dot_segments)]

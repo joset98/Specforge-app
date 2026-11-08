@@ -44,3 +44,12 @@ def test_client_ip_ignores_forwarded_header_without_proxy():
 
     assert client_ip(_request("6.6.6.6"), trust_proxy=False) == "10.0.0.1"
     assert client_ip(_request(None), trust_proxy=True) == "10.0.0.1"
+
+
+def test_refund_returns_a_run():
+    q = QuotaTracker(per_ip=1, global_cap=10)
+    assert q.try_consume("a") and q.remaining("a") == 0
+    q.refund("a")
+    assert q.remaining("a") == 1
+    q.refund("a")
+    assert q.remaining("a") == 1

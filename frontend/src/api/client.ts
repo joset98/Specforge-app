@@ -83,6 +83,10 @@ export async function exportGithub(
     headers: { 'Content-Type': 'application/json', 'X-GitHub-Token': token },
     body: JSON.stringify({ result, repo }),
   })
-  if (res.status === 502) return res.json() // partial failure still lists created issues
+  if (!res.ok) {
+    // GitHub failures (4xx/502) still list the issues created before the error.
+    const body = await res.clone().json().catch(() => null)
+    if (body && Array.isArray(body.issues)) return body
+  }
   return (await check(res)).json()
 }

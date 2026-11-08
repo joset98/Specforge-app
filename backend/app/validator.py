@@ -60,6 +60,12 @@ def validate(stories: list[Story], arch: ArchitectOutput, tests: list[TestCase])
                     f"La columna {t.name}.{c.name} apunta a {c.foreign_key}, que no existe "
                     "(usa el formato tabla.columna).")
 
+    routes = Counter((e.method, e.path) for e in arch.endpoints)
+    for (method, path), n in routes.items():
+        if n > 1:
+            add("DUPLICATE_ROUTE", "architect",
+                f"La ruta {method} {path} está definida {n} veces; unifica o cambia la ruta.")
+
     tested = {t.endpoint_id for t in tests}
     for eid in sorted(endpoint_ids - tested):
         add("ENDPOINT_WITHOUT_TEST", "qa", f"El endpoint {eid} no tiene ningún caso de prueba.")

@@ -109,3 +109,10 @@ async def test_refine_runs_correction_loop(sample_result):
     assert len(fake.calls) == 2
     assert "## Problemas a corregir" in fake.calls[1][1]
     assert validations(events)[-1]["rounds"] == 1
+
+
+async def test_unexpected_exception_emits_generic_error(sample_result):
+    fake = FakeProvider([RuntimeError("boom")])
+    events = await collect(Orchestrator(fake).run(sample_result.input))
+    assert events[-1][0] == "error" and events[-1][1]["code"] == "internal"
+    assert "boom" not in events[-1][1]["message"]

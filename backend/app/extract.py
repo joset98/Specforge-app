@@ -16,14 +16,27 @@ def _pdf(data: bytes) -> str:
     return text
 
 
+def _docx_blocks(container) -> list[str]:
+    """Paragraphs and tables in document order; merged cells once; nested tables included."""
+    parts: list[str] = []
+    for block in container.iter_inner_content():
+        if hasattr(block, "rows"):
+            seen = set()
+            for row in block.rows:
+                for cell in row.cells:
+                    if id(cell._tc) in seen:  # merged cells repeat the same element
+                        continue
+                    seen.add(id(cell._tc))
+                    parts += _docx_blocks(cell)
+        else:
+            parts.append(block.text)
+    return parts
+
+
 def _docx(data: bytes) -> str:
     from docx import Document
 
-    doc = Document(io.BytesIO(data))
-    parts = [p.text for p in doc.paragraphs]
-    # Requirements docs often live in tables; include every cell.
-    parts += [cell.text for t in doc.tables for row in t.rows for cell in row.cells]
-    return "\n".join(parts)
+    return "\n".join(_docx_blocks(Document(io.BytesIO(data))))
 
 
 def _plain(data: bytes) -> str:

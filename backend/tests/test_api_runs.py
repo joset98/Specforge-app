@@ -152,3 +152,19 @@ def test_body_without_content_length_rejected(env):
 
     res = client.post("/api/refine", content=chunks(), headers={"Content-Type": "application/json"})
     assert res.status_code == 411
+
+
+def test_free_run_refunded_when_owner_key_fails_before_any_agent(env):
+    client, state = env
+    state["responses"] = [ProviderError("rate_limited")]
+    res = client.post("/api/runs", data={"text": "x"})
+    assert parse_sse(res.text)[-1][0] == "error"
+    assert client.get("/api/quota").json()["remaining"] == 3
+
+
+def test_free_run_kept_when_failure_after_an_agent_finished(env, sample_result):
+    client, state = env
+    state["responses"] = [{"stories": [s.model_dump() for s in sample_result.stories]},
+                          ProviderError("upstream")]
+    client.post("/api/runs", data={"text": "x"})
+    assert client.get("/api/quota").json()["remaining"] == 2

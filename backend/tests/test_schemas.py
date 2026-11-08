@@ -27,3 +27,17 @@ def test_sample_result_roundtrips(sample_result):
 def test_refine_rejects_unknown_section(sample_result):
     with pytest.raises(ValidationError):
         RefineRequest(result=sample_result, section="hacker", feedback="x")
+
+
+@pytest.mark.parametrize("repo", ["../..", "owner/..", "./x", "a/b/c"])
+def test_github_repo_rejects_dot_names(sample_result, repo):
+    from app.schemas import GithubExportRequest
+
+    with pytest.raises(ValidationError):
+        GithubExportRequest(result=sample_result, repo=repo)
+
+
+def test_github_repo_accepts_dotted_names(sample_result):
+    from app.schemas import GithubExportRequest
+
+    assert GithubExportRequest(result=sample_result, repo="my.org/repo.js").repo == "my.org/repo.js"

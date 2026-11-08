@@ -56,3 +56,12 @@ def test_unresolved_table_refs_still_valid(sample_result):
     r.architecture.endpoints[0].response_table = "ghosts"
     r.architecture.endpoints[0].path = "owners/{ownerId}/pets"
     validate(spec(r))
+
+
+def test_express_params_and_query_strings_normalized(sample_result):
+    r = sample_result.model_copy(deep=True)
+    r.architecture.endpoints[2].path = "/owners/:ownerId/pets/:petId?expand=true"
+    s = spec(r)
+    validate(s)
+    op = s["paths"]["/owners/{ownerId}/pets/{petId}"]["get"]
+    assert {p["name"] for p in op["parameters"]} == {"ownerId", "petId"}
