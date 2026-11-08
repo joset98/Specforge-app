@@ -79,3 +79,33 @@ async def test_invalid_output_twice_emits_error(sample_result):
     fake = FakeProvider([{"bad": 1}, {"bad": 2}])
     events = await collect(Orchestrator(fake).run(sample_result.input))
     assert events[-1][0] == "error" and events[-1][1]["code"] == "llm_output_invalid"
+
+
+async def test_refine_architect_reruns_architect_then_qa_with_previous(sample_result):
+    _, arch, qa = outputs(sample_result)
+    fake = FakeProvider([arch, qa])
+    events = await collect(Orchestrator(fake).refine(sample_result, "architect", "usa soft delete"))
+    assert [c[2] for c in fake.calls] == ["ArchitectOutput", "QAOutput"]
+    arch_user, qa_user = fake.calls[0][1], fake.calls[1][1]
+    assert "## Feedback del usuario" in arch_user and "usa soft delete" in arch_user
+    assert "## Resultado anterior" in arch_user
+    assert "## Resultado anterior" in qa_user and "## Feedback del usuario" not in qa_user
+    result = events[-1][1]
+    assert result["stories"] == [s.model_dump() for s in sample_result.stories]
+    assert validations(events)[-1]["passed"] is True
+
+
+async def test_refine_qa_only_one_call(sample_result):
+    _, _, qa = outputs(sample_result)
+    fake = FakeProvider([qa])
+    events = await collect(Orchestrator(fake).refine(sample_result, "qa", "más errores"))
+    assert len(fake.calls) == 1 and events[-1][0] == "result"
+
+
+async def test_refine_runs_correction_loop(sample_result):
+    _, _, qa = outputs(sample_result)
+    fake = FakeProvider([{"tests": qa["tests"][:2]}, qa])
+    events = await collect(Orchestrator(fake).refine(sample_result, "qa", "menos casos"))
+    assert len(fake.calls) == 2
+    assert "## Problemas a corregir" in fake.calls[1][1]
+    assert validations(events)[-1]["rounds"] == 1

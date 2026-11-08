@@ -72,6 +72,22 @@ class Orchestrator:
         async for e in self._guarded(state, steps()):
             yield e
 
+    async def refine(self, result: PipelineResult, section: Section,
+                     feedback: str) -> AsyncIterator[Event]:
+        state = _State(result.input)
+        state.ctx.stories = result.stories
+        state.ctx.architecture = result.architecture
+        state.tests = result.tests
+
+        async def steps() -> AsyncIterator[Event]:
+            for s in ORDER[ORDER.index(section):]:
+                async for e in self._step(state, s, previous=state.output_of(s),
+                                          feedback=feedback if s == section else None):
+                    yield e
+
+        async for e in self._guarded(state, steps()):
+            yield e
+
     async def _guarded(self, state: _State, steps: AsyncIterator[Event]) -> AsyncIterator[Event]:
         """Run the given agent steps, then the validation loop; turn failures into error events."""
         try:
