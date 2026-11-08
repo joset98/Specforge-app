@@ -15,9 +15,14 @@ ColumnType = Literal[
 ]
 
 
+# Hard caps for client-supplied results (refine/export); match the default settings.
+MAX_TEXT_CHARS = 30000
+MAX_CONTEXT_CHARS = 2000
+
+
 class RunInput(BaseModel):
-    text: str
-    team_context: str = ""
+    text: str = Field(max_length=MAX_TEXT_CHARS)
+    team_context: str = Field("", max_length=MAX_CONTEXT_CHARS)
 
 
 class Story(BaseModel):

@@ -48,7 +48,10 @@ async def limit_body_size(request: Request, call_next):
         limit = (settings.max_upload_mb * 1024 + 64 if request.url.path == "/api/runs"
                  else settings.max_body_kb) * 1024
         length = request.headers.get("content-length")
-        if length and length.isdigit() and int(length) > limit:
+        # Chunked bodies have no length to check; browsers always send one.
+        if not (length and length.isdigit()):
+            return JSONResponse({"detail": "Content-Length required."}, status_code=411)
+        if int(length) > limit:
             return JSONResponse({"detail": "Request body too large."}, status_code=413)
     return await call_next(request)
 
@@ -60,7 +63,7 @@ def health() -> dict:
 
 @app.get("/api/quota")
 def quota(request: Request, q: QuotaTracker = Depends(get_quota)) -> dict:
-    return {"remaining": q.remaining(client_ip(request)), "limit": q.per_ip}
+    return {"remaining": q.remaining(client_ip(request, settings.trust_proxy)), "limit": q.per_ip}
 
 
 def _start(request: Request, provider: str | None, key: str | None, q: QuotaTracker,
@@ -70,7 +73,7 @@ def _start(request: Request, provider: str | None, key: str | None, q: QuotaTrac
         llm = factory(provider, key, settings)
     except ProviderError as e:
         raise HTTPException(PROVIDER_STATUS[e.code], e.message) from e
-    if not key and not q.try_consume(client_ip(request)):
+    if not key and not q.try_consume(client_ip(request, settings.trust_proxy)):
         raise HTTPException(429, "free_quota_exhausted")
     log.info("pipeline start provider=%s byok=%s", provider or settings.default_provider,
              bool(key))

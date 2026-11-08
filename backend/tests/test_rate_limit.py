@@ -23,3 +23,24 @@ def test_resets_on_new_day():
     assert q.try_consume("a") and not q.try_consume("a")
     day[0] = date(2026, 1, 2)
     assert q.remaining("a") == 1 and q.try_consume("a")
+
+
+def _request(xff: str | None, host: str = "10.0.0.1"):
+    from starlette.requests import Request
+
+    headers = [(b"x-forwarded-for", xff.encode())] if xff else []
+    return Request({"type": "http", "headers": headers, "client": (host, 1234)})
+
+
+def test_client_ip_uses_rightmost_forwarded_entry_behind_proxy():
+    from app.rate_limit import client_ip
+
+    # The visitor can forge leftmost entries; the proxy appends the real IP last.
+    assert client_ip(_request("6.6.6.6, 203.0.113.9"), trust_proxy=True) == "203.0.113.9"
+
+
+def test_client_ip_ignores_forwarded_header_without_proxy():
+    from app.rate_limit import client_ip
+
+    assert client_ip(_request("6.6.6.6"), trust_proxy=False) == "10.0.0.1"
+    assert client_ip(_request(None), trust_proxy=True) == "10.0.0.1"

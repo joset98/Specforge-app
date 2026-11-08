@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     max_context_chars: int = 2000
     max_body_kb: int = 1024
     allowed_origins: list[str] = ["http://localhost:5173"]
+    # Set only when running behind a proxy that appends X-Forwarded-For (e.g. Render).
+    trust_proxy: bool = False
 
 
 @lru_cache

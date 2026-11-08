@@ -107,13 +107,9 @@ cd frontend && npm test && npm run lint
 
 ## Deploy
 
-- **Backend (e.g. Render):** root `backend`, build `pip install .`, start command:
+- **Backend (e.g. Render):** root `backend`, build `pip install .`, start command `uvicorn app.main:app --host 0.0.0.0 --port $PORT`, and set `TRUST_PROXY=true`.
 
-  ```bash
-  uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips="*"
-  ```
-
-  `--proxy-headers` matters: without it every visitor shares the proxy's IP and the free quota runs out for everyone at once.
+  With `TRUST_PROXY=true`, the free quota counts visitors by the **rightmost** `X-Forwarded-For` entry, the one the proxy appended. A visitor can't fake it by sending their own header. Leave it `false` when nothing sits in front of the app.
 - **Frontend (e.g. Vercel):** root `frontend`, set `VITE_API_URL` to the backend URL, then add the frontend URL to the backend's `ALLOWED_ORIGINS`.
 
 ## Configuration
@@ -132,6 +128,7 @@ cd frontend && npm test && npm run lint
 | `MAX_CONTEXT_CHARS` | `2000` | Team context is truncated to this |
 | `MAX_BODY_KB` | `1024` | Body limit for refine and export requests |
 | `ALLOWED_ORIGINS` | `["http://localhost:5173"]` | CORS origins (JSON list) |
+| `TRUST_PROXY` | `false` | Count free runs by the proxy-appended `X-Forwarded-For` IP |
 
 ## Known limits
 

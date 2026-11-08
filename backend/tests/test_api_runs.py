@@ -132,3 +132,23 @@ def test_user_key_never_logged(env, caplog):
     assert parse_sse(res.text)[-1] == ("error", expected)
     logging.getLogger("anything").warning("leak %s", "sk-ant-supersecret123")
     assert "supersecret" not in caplog.text
+
+
+def test_refine_rejects_oversized_input_text(env, sample_result):
+    client, state = env
+    body = {"result": sample_result.model_dump(), "section": "qa", "feedback": "x"}
+    body["result"]["input"]["text"] = "a" * 30001
+    assert client.post("/api/refine", json=body).status_code == 422
+    body["result"]["input"]["text"] = "ok"
+    body["result"]["input"]["team_context"] = "a" * 2001
+    assert client.post("/api/refine", json=body).status_code == 422
+
+
+def test_body_without_content_length_rejected(env):
+    client, _ = env
+
+    def chunks():
+        yield b'{"result": '
+
+    res = client.post("/api/refine", content=chunks(), headers={"Content-Type": "application/json"})
+    assert res.status_code == 411

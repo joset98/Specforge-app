@@ -34,6 +34,11 @@ class QuotaTracker:
         return True
 
 
-def client_ip(request: Request) -> str:
-    # Correct behind Render's proxy only because uvicorn runs with --proxy-headers.
+def client_ip(request: Request, trust_proxy: bool) -> str:
+    """Behind a proxy, the rightmost X-Forwarded-For entry is the one the proxy appended;
+    entries to its left are client-supplied and can be forged."""
+    if trust_proxy:
+        forwarded = [h.strip() for h in request.headers.get("x-forwarded-for", "").split(",")]
+        if forwarded[-1]:
+            return forwarded[-1]
     return request.client.host if request.client else "unknown"
