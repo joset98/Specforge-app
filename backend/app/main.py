@@ -3,16 +3,18 @@ from collections.abc import AsyncIterator, Callable
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from app.config import Settings, get_settings
+from app.exporters.jira_csv import to_jira_csv
+from app.exporters.markdown import to_markdown
 from app.extract import ExtractionError, extract_text
 from app.logging_filter import install_logging
 from app.orchestrator import Event, Orchestrator
 from app.providers.base import LLMProvider, ProviderError
 from app.providers.factory import make_provider
 from app.rate_limit import QuotaTracker, client_ip
-from app.schemas import RefineRequest, RunInput
+from app.schemas import PipelineResult, RefineRequest, RunInput
 from app.sse import format_sse
 
 install_logging()
@@ -121,3 +123,23 @@ async def refine(
 ):
     orch = _start(request, x_llm_provider, x_llm_key, q, factory)
     return _stream(orch.refine(body.result, body.section, body.feedback))
+
+
+EXPORTS: dict[str, tuple[Callable[[PipelineResult], str] | None, str, str]] = {
+    "markdown": (to_markdown, "md", "text/markdown; charset=utf-8"),
+    "json": (lambda r: r.model_dump_json(indent=2), "json", "application/json"),
+    "jira-csv": (to_jira_csv, "csv", "text/csv; charset=utf-8"),
+    "openapi": (None, "yaml", "application/yaml"),
+    "sql": (None, "sql", "application/sql"),
+}
+
+
+@app.post("/api/export/{fmt}")
+def export(fmt: str, result: PipelineResult) -> Response:
+    if fmt not in EXPORTS:
+        raise HTTPException(404, f"Unknown export format '{fmt}'.")
+    render, ext, media = EXPORTS[fmt]
+    if render is None:
+        raise HTTPException(501, "Not implemented yet.")
+    return Response(render(result), media_type=media,
+                    headers={"Content-Disposition": f"attachment; filename=requirements.{ext}"})
