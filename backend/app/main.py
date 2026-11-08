@@ -1,11 +1,13 @@
 import logging
 from collections.abc import AsyncIterator, Callable
 
+import httpx
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from app.config import Settings, get_settings
+from app.exporters.github import create_issues
 from app.exporters.jira_csv import to_jira_csv
 from app.exporters.markdown import to_markdown
 from app.exporters.openapi import to_openapi
@@ -16,7 +18,7 @@ from app.orchestrator import Event, Orchestrator
 from app.providers.base import LLMProvider, ProviderError
 from app.providers.factory import make_provider
 from app.rate_limit import QuotaTracker, client_ip
-from app.schemas import PipelineResult, RefineRequest, RunInput
+from app.schemas import GithubExportRequest, PipelineResult, RefineRequest, RunInput
 from app.sse import format_sse
 
 install_logging()
@@ -125,6 +127,27 @@ async def refine(
 ):
     orch = _start(request, x_llm_provider, x_llm_key, q, factory)
     return _stream(orch.refine(body.result, body.section, body.feedback))
+
+
+async def get_http_client() -> AsyncIterator[httpx.AsyncClient]:
+    async with httpx.AsyncClient(timeout=20) as client:
+        yield client
+
+
+# Declared before /api/export/{fmt} so "github" is not taken as a format.
+@app.post("/api/export/github")
+async def export_github(
+    body: GithubExportRequest,
+    x_github_token: str | None = Header(None),
+    client: httpx.AsyncClient = Depends(get_http_client),
+):
+    if not x_github_token:
+        raise HTTPException(400, "Missing X-GitHub-Token header.")
+    created, error = await create_issues(body.result, body.repo, x_github_token, client)
+    if error:
+        log.warning("github export failed after %d issues", len(created))
+        return JSONResponse({"issues": created, "error": error}, status_code=502)
+    return {"issues": created}
 
 
 EXPORTS: dict[str, tuple[Callable[[PipelineResult], str] | None, str, str]] = {
