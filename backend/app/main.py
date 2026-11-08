@@ -1,0 +1,123 @@
+import logging
+from collections.abc import AsyncIterator, Callable
+
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, StreamingResponse
+
+from app.config import Settings, get_settings
+from app.extract import ExtractionError, extract_text
+from app.logging_filter import install_logging
+from app.orchestrator import Event, Orchestrator
+from app.providers.base import LLMProvider, ProviderError
+from app.providers.factory import make_provider
+from app.rate_limit import QuotaTracker, client_ip
+from app.schemas import RefineRequest, RunInput
+from app.sse import format_sse
+
+install_logging()
+log = logging.getLogger("app")
+settings = get_settings()
+app = FastAPI(title="AI Requirements Generator")
+app.add_middleware(CORSMiddleware, allow_origins=settings.allowed_origins,
+                   allow_methods=["*"], allow_headers=["*"],
+                   expose_headers=["Content-Disposition"])
+
+_quota = QuotaTracker(settings.free_runs_per_day, settings.max_free_runs_total_per_day)
+PROVIDER_STATUS = {"auth": 401, "rate_limited": 429, "upstream": 502}
+ProviderFactory = Callable[[str | None, str | None, Settings], LLMProvider]
+
+
+def get_quota() -> QuotaTracker:
+    return _quota
+
+
+def get_provider_factory() -> ProviderFactory:
+    return make_provider
+
+
+@app.middleware("http")
+async def limit_body_size(request: Request, call_next):
+    if request.method == "POST":
+        limit = (settings.max_upload_mb * 1024 + 64 if request.url.path == "/api/runs"
+                 else settings.max_body_kb) * 1024
+        length = request.headers.get("content-length")
+        if length and length.isdigit() and int(length) > limit:
+            return JSONResponse({"detail": "Request body too large."}, status_code=413)
+    return await call_next(request)
+
+
+@app.get("/api/health")
+def health() -> dict:
+    return {"status": "ok"}
+
+
+@app.get("/api/quota")
+def quota(request: Request, q: QuotaTracker = Depends(get_quota)) -> dict:
+    return {"remaining": q.remaining(client_ip(request)), "limit": q.per_ip}
+
+
+def _start(request: Request, provider: str | None, key: str | None, q: QuotaTracker,
+           factory: ProviderFactory) -> Orchestrator:
+    """Build the provider first (no network), then charge the free quota only if it worked."""
+    try:
+        llm = factory(provider, key, settings)
+    except ProviderError as e:
+        raise HTTPException(PROVIDER_STATUS[e.code], e.message) from e
+    if not key and not q.try_consume(client_ip(request)):
+        raise HTTPException(429, "free_quota_exhausted")
+    log.info("pipeline start provider=%s byok=%s", provider or settings.default_provider,
+             bool(key))
+    return Orchestrator(llm)
+
+
+def _stream(events: AsyncIterator[Event]) -> StreamingResponse:
+    async def body():
+        async for event, data in events:
+            if event == "error":
+                log.warning("pipeline error code=%s", data["code"])
+            yield format_sse(event, data)
+
+    return StreamingResponse(body(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.post("/api/runs")
+async def create_run(
+    request: Request,
+    text: str | None = Form(None),
+    file: UploadFile | None = File(None),
+    team_context: str = Form(""),
+    x_llm_provider: str | None = Header(None),
+    x_llm_key: str | None = Header(None),
+    q: QuotaTracker = Depends(get_quota),
+    factory: ProviderFactory = Depends(get_provider_factory),
+):
+    data = None
+    if file is not None:
+        limit = settings.max_upload_mb * 1024 * 1024
+        data = await file.read(limit + 1)
+        if len(data) > limit:
+            raise HTTPException(413, f"File larger than {settings.max_upload_mb} MB.")
+    try:
+        requirement = extract_text(file.filename if file else None, data, text,
+                                   settings.max_text_chars)
+    except ExtractionError as e:
+        raise HTTPException(400, str(e)) from e
+    run_input = RunInput(text=requirement,
+                         team_context=team_context.strip()[: settings.max_context_chars])
+    orch = _start(request, x_llm_provider, x_llm_key, q, factory)
+    return _stream(orch.run(run_input))
+
+
+@app.post("/api/refine")
+async def refine(
+    request: Request,
+    body: RefineRequest,
+    x_llm_provider: str | None = Header(None),
+    x_llm_key: str | None = Header(None),
+    q: QuotaTracker = Depends(get_quota),
+    factory: ProviderFactory = Depends(get_provider_factory),
+):
+    orch = _start(request, x_llm_provider, x_llm_key, q, factory)
+    return _stream(orch.refine(body.result, body.section, body.feedback))
