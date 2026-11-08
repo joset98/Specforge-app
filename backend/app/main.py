@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from app.config import Settings, get_settings
 from app.exporters.jira_csv import to_jira_csv
 from app.exporters.markdown import to_markdown
+from app.exporters.openapi import to_openapi
 from app.extract import ExtractionError, extract_text
 from app.logging_filter import install_logging
 from app.orchestrator import Event, Orchestrator
@@ -129,7 +130,7 @@ EXPORTS: dict[str, tuple[Callable[[PipelineResult], str] | None, str, str]] = {
     "markdown": (to_markdown, "md", "text/markdown; charset=utf-8"),
     "json": (lambda r: r.model_dump_json(indent=2), "json", "application/json"),
     "jira-csv": (to_jira_csv, "csv", "text/csv; charset=utf-8"),
-    "openapi": (None, "yaml", "application/yaml"),
+    "openapi": (to_openapi, "yaml", "application/yaml"),
     "sql": (None, "sql", "application/sql"),
 }
 
