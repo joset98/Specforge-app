@@ -69,3 +69,43 @@ def build_sample_result() -> PipelineResult:
 @pytest.fixture
 def sample_result() -> PipelineResult:
     return build_sample_result()
+
+
+def make_pdf(text: str) -> bytes:
+    from fpdf import FPDF
+
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Helvetica", size=12)
+    pdf.multi_cell(0, 10, text)
+    return bytes(pdf.output())
+
+
+def make_blank_pdf() -> bytes:
+    import io
+
+    from pypdf import PdfWriter
+
+    w = PdfWriter()
+    w.add_blank_page(width=200, height=200)
+    buf = io.BytesIO()
+    w.write(buf)
+    return buf.getvalue()
+
+
+def make_docx(paragraphs: list[str], table_rows: list[list[str]]) -> bytes:
+    import io
+
+    from docx import Document
+
+    doc = Document()
+    for p in paragraphs:
+        doc.add_paragraph(p)
+    if table_rows:
+        table = doc.add_table(rows=len(table_rows), cols=len(table_rows[0]))
+        for r, row in enumerate(table_rows):
+            for c, val in enumerate(row):
+                table.cell(r, c).text = val
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
